@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Assistant</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #messages { margin-bottom: 20px; }
+        button { padding: 10px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h2>Medical Assistant</h2>
+    <div id="messages"></div>
+    <button id="startRecord">Start Recording</button>
+    <button id="stopRecord" disabled>Stop Recording</button>
+    <audio id="audioPlayer" controls style="display: none;"></audio>
+
+    <script>
+        let ws;
+        let mediaRecorder;
+        let audioChunks = [];
+        const clientId = 'client_' + Math.random().toString(36).substr(2, 9);
+
+        function connect() {
+            ws = new WebSocket(`ws://127.0.0.1:8000/ws/${clientId}`);
+            
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'audio_response') {
+                        // Handle audio response
+                        const audio = document.getElementById('audioPlayer');
+                        audio.src = 'data:audio/wav;base64,' + data.audio;
+                        audio.style.display = 'block';
+                        audio.play();
+                    }
+                } catch {
+                    // Handle text messages
+                    const messages = document.getElementById('messages');
+                    messages.innerHTML += event.data + '<br>';
+                }
+            };
+
+            ws.onclose = function() {
+                setTimeout(connect, 1000);
+            };
+        }
+
+        document.getElementById('startRecord').onclick = async function() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/m4a' });
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = function() {
+                        const base64Audio = reader.result.split(',')[1];
+                        ws.send(JSON.stringify({
+                            type: 'audio',
+                            audio: base64Audio
+                        }));
+                    };
+                    audioChunks = [];
+                };
+
+                mediaRecorder.start();
+                document.getElementById('startRecord').disabled = true;
+                document.getElementById('stopRecord').disabled = false;
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        };
+
+        document.getElementById('stopRecord').onclick = function() {
+            mediaRecorder.stop();
+            document.getElementById('startRecord').disabled = false;
+            document.getElementById('stopRecord').disabled = true;
+        };
+
+        connect();
+    </script>
+</body>
+</html>
